@@ -433,6 +433,163 @@ Generate the social media post:"""
                 else:
                     print(f"  Status code: {e.response.status_code}")
             return False
+    
+    def generate_replies_batch(
+        self,
+        product_description: str,
+        posts: List[Dict],
+        tone: str = "engaging"
+    ) -> Optional[List[Dict[str, str]]]:
+        """
+        Generate replies to multiple posts at once using structured output.
+        
+        Args:
+            product_description: Business/product description from Notion
+            posts: List of post dictionaries with 'id', 'content', and 'account' keys
+            tone: Tone for replies (engaging, professional, casual, etc.)
+        
+        Returns:
+            List of dictionaries with 'post_id' and 'reply' keys, or None if failed
+        """
+        if not posts:
+            print("✗ No posts provided for reply generation")
+            return None
+        
+        # Format posts for the prompt
+        posts_text = ""
+        for i, post in enumerate(posts, 1):
+            post_id = post.get('id', 'unknown')
+            post_content = post.get('content', '')
+            account = post.get('account', {})
+            username = account.get('username', 'unknown') if isinstance(account, dict) else 'unknown'
+            
+            # Clean HTML tags from content (Mastodon returns HTML)
+            import re
+            post_content_clean = re.sub(r'<[^>]+>', '', post_content)
+            post_content_clean = post_content_clean.strip()
+            
+            posts_text += f"\nPost {i} (ID: {post_id}, by @{username}):\n{post_content_clean}\n"
+        
+        # Build prompt with structured output format
+        prompt = f"""You are a helpful social media manager. Based on the following business description, generate engaging replies to the posts below.
+
+Business Description:
+{product_description}
+
+Posts to Reply To:
+{posts_text}
+
+Requirements:
+- Generate a natural, engaging reply for each post
+- Replies should be relevant to both the original post and your business
+- Tone: {tone}
+- Maximum 280 characters per reply (keep it concise)
+- Be authentic and helpful, not overly promotional
+- Use appropriate emojis sparingly
+
+Return your replies in the following JSON format:
+{{
+  "replies": [
+    {{"post_id": "post_id_1", "reply": "Your reply text here"}},
+    {{"post_id": "post_id_2", "reply": "Your reply text here"}},
+    ...
+  ]
+}}
+
+IMPORTANT: Wrap your JSON response between these tags:
+<POST_START>
+{{"replies": [...]}}
+<POST_END>"""
+        
+        try:
+            request_data = {
+                "model": self.model,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                "temperature": 0.7,
+                "response_format": {"type": "json_object"}  # Request structured JSON output
+            }
+            
+            response = requests.post(
+                f"{self.BASE_URL}/chat/completions",
+                headers=self.headers,
+                json=request_data,
+                timeout=60
+            )
+            
+            if response.status_code >= 400:
+                print(f"✗ API returned error status {response.status_code}")
+                try:
+                    error_body = response.json()
+                    print(f"  Error details: {error_body}")
+                except:
+                    print(f"  Response text: {response.text[:200]}")
+            
+            response.raise_for_status()
+            result = response.json()
+            
+            # Extract the generated JSON
+            if "choices" in result and len(result["choices"]) > 0:
+                message = result["choices"][0]["message"]
+                content = message.get("content", "")
+                
+                # Try to extract JSON from markers first
+                marked_content = self._extract_post_from_markers(content)
+                if marked_content:
+                    content = marked_content
+                
+                # Parse JSON
+                try:
+                    # Remove markdown code blocks if present
+                    content = re.sub(r'```json\s*|\s*```', '', content).strip()
+                    replies_data = json.loads(content)
+                    
+                    replies_list = replies_data.get('replies', [])
+                    
+                    # Validate and clean replies
+                    formatted_replies = []
+                    for reply_item in replies_list:
+                        post_id = str(reply_item.get('post_id', ''))
+                        reply_text = reply_item.get('reply', '').strip()
+                        
+                        if post_id and reply_text:
+                            # Ensure reply is within character limit
+                            if len(reply_text) > 280:
+                                reply_text = reply_text[:280].rsplit(' ', 1)[0] + '...'
+                            
+                            formatted_replies.append({
+                                'post_id': post_id,
+                                'reply': reply_text
+                            })
+                    
+                    print(f"✓ Generated {len(formatted_replies)} replies successfully")
+                    return formatted_replies
+                except json.JSONDecodeError as e:
+                    print(f"✗ Failed to parse JSON response: {e}")
+                    print(f"  Raw content: {content[:500]}")
+                    return None
+            else:
+                print(f"✗ Unexpected response format: {result}")
+                return None
+                
+        except requests.exceptions.RequestException as e:
+            print(f"✗ Failed to generate replies: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    error_detail = e.response.json()
+                    print(f"  Error details: {error_detail}")
+                except:
+                    print(f"  Status code: {e.response.status_code}")
+            return None
+        except Exception as e:
+            print(f"✗ Unexpected error generating replies: {type(e).__name__}: {e}")
+            import traceback
+            print(f"  Traceback:\n{traceback.format_exc()}")
+            return None
 
 
 def load_config(config_path: str = ".config/openrouter_config.json") -> dict:

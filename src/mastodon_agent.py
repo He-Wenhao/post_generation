@@ -10,7 +10,7 @@ import sys
 import json
 import argparse
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Dict
 
 try:
     from mastodon import Mastodon
@@ -99,6 +99,32 @@ class MastodonAgent:
             print(f"✗ Failed to post: {e}")
             return None
     
+    def reply_to_status(self, status_id: int, content: str, 
+                       visibility: str = 'public') -> Optional[dict]:
+        """
+        Reply to a status on Mastodon
+        
+        Args:
+            status_id: ID of the status to reply to
+            content: Reply content
+            visibility: 'public', 'unlisted', 'private', or 'direct'
+        
+        Returns:
+            The created reply status dict, or None if failed
+        """
+        try:
+            reply = self.mastodon.status_post(
+                content,
+                in_reply_to_id=status_id,
+                visibility=visibility
+            )
+            print(f"✓ Replied successfully! Reply ID: {reply['id']}")
+            print(f"  URL: {reply['url']}")
+            return reply
+        except Exception as e:
+            print(f"✗ Failed to reply: {e}")
+            return None
+    
     def post_thread(self, posts: list, visibility: str = 'public') -> list:
         """
         Post a thread (multiple connected statuses)
@@ -165,6 +191,95 @@ class MastodonAgent:
             parts.append(current_part.strip())
         
         return parts
+    
+    def search_posts(self, query: str, limit: int = 5) -> List[Dict]:
+        """
+        Search for posts on Mastodon related to a keyword
+        
+        Args:
+            query: Search query (keyword or hashtag)
+            limit: Maximum number of posts to return (default: 5)
+        
+        Returns:
+            List of post dictionaries
+        """
+        try:
+            # Search for posts using Mastodon search API
+            # Try different parameter combinations based on Mastodon.py version
+            try:
+                # Try with type and limit parameters (newer versions)
+                results = self.mastodon.search(q=query, type='statuses', limit=limit * 2)
+            except (TypeError, KeyError) as e:
+                # If type parameter not supported, try without it
+                try:
+                    results = self.mastodon.search(q=query, limit=limit * 2)
+                except TypeError:
+                    # If limit also not supported, use minimal parameters
+                    results = self.mastodon.search(q=query)
+            
+            # Handle both dict and AttribAccessDict return types
+            if hasattr(results, 'statuses'):
+                statuses = results.statuses
+            elif hasattr(results, 'get'):
+                statuses = results.get('statuses', [])
+            else:
+                statuses = []
+            
+            if not statuses:
+                print(f"ℹ No posts found for query: {query}")
+                return []
+            
+            # Filter to get most recent posts
+            # Remove duplicates and sort by creation time
+            seen_ids = set()
+            unique_statuses = []
+            for status in statuses:
+                if status['id'] not in seen_ids:
+                    seen_ids.add(status['id'])
+                    unique_statuses.append(status)
+            
+            # Sort by creation time (most recent first)
+            unique_statuses.sort(key=lambda x: x['created_at'], reverse=True)
+            
+            # Return top limit posts
+            return unique_statuses[:limit]
+        except Exception as e:
+            print(f"✗ Failed to search posts: {e}")
+            return []
+    
+    def reply_to_status(self, status_id: int, content: str, 
+                       visibility: str = 'public') -> Optional[Dict]:
+        """
+        Reply to a status on Mastodon
+        
+        Args:
+            status_id: ID of the status to reply to
+            content: Reply content (max 500 characters)
+            visibility: 'public', 'unlisted', 'private', or 'direct'
+        
+        Returns:
+            The created reply status dict, or None if failed
+        """
+        # Mastodon character limit is typically 500
+        max_length = 500
+        
+        if len(content) > max_length:
+            print(f"⚠ Warning: Reply content is {len(content)} characters, max is {max_length}")
+            # Truncate at word boundary
+            content = content[:max_length].rsplit(' ', 1)[0] + '...'
+        
+        try:
+            reply = self.mastodon.status_post(
+                content,
+                in_reply_to_id=status_id,
+                visibility=visibility
+            )
+            print(f"✓ Replied successfully! Reply ID: {reply['id']}")
+            print(f"  URL: {reply['url']}")
+            return reply
+        except Exception as e:
+            print(f"✗ Failed to reply: {e}")
+            return None
 
 
 def load_config(config_path: str = ".config/mastodon_config.json") -> dict:

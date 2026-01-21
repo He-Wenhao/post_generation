@@ -157,10 +157,50 @@ class PostWorkflow:
             access_token=mastodon_access_token
         )
     
+    def _extract_keywords(self, description: str) -> List[str]:
+        """
+        Extract keywords from product description.
+        Simple implementation - can be enhanced with NLP libraries.
+        
+        Args:
+            description: Product description text
+        
+        Returns:
+            List of keywords
+        """
+        import re
+        
+        # Convert to lowercase
+        text = description.lower()
+        
+        # Remove common stop words (simple list)
+        stop_words = {
+            'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+            'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were', 'been',
+            'be', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would',
+            'could', 'should', 'may', 'might', 'must', 'can', 'this', 'that',
+            'these', 'those', 'it', 'its', 'they', 'them', 'their', 'there',
+            'here', 'where', 'what', 'who', 'which', 'how', 'why', 'when'
+        }
+        
+        # Extract words (alphanumeric sequences)
+        words = re.findall(r'\b[a-z]+\b', text)
+        
+        # Filter out stop words and short words
+        keywords = [w for w in words if w not in stop_words and len(w) > 3]
+        
+        # Get unique keywords, sorted by frequency
+        from collections import Counter
+        word_counts = Counter(keywords)
+        
+        # Return top keywords (most frequent first)
+        return [word for word, count in word_counts.most_common(10)]
+    
     def run(
         self,
         source_page_id: str,
-        platforms: List[str],
+        mode: str = "post",
+        platforms: List[str] = None,
         tone: str = "engaging",
         auto_publish: bool = False,
         mastodon_visibility: str = "public",
@@ -168,6 +208,43 @@ class PostWorkflow:
     ) -> Dict:
         """
         Run the complete workflow
+        
+        Args:
+            source_page_id: Notion page ID containing product description
+            mode: Workflow mode - "post" (generate and publish posts) or "reply" (find and reply to posts)
+            platforms: List of platforms (twitter, linkedin, instagram, etc.) - only used in "post" mode
+            tone: Tone for posts (engaging, professional, casual, etc.)
+            auto_publish: If True, publish without confirmation - only used in "post" mode
+            mastodon_visibility: Mastodon post visibility (public, unlisted, private, direct)
+            mastodon_spoiler: Optional spoiler/content warning text - only used in "post" mode
+        
+        Returns:
+            Dictionary with workflow results
+        """
+        if mode not in ["post", "reply"]:
+            raise ValueError(f"Invalid mode: {mode}. Must be 'post' or 'reply'")
+        
+        if mode == "post":
+            return self._run_post_mode(
+                source_page_id, platforms or [], tone, 
+                auto_publish, mastodon_visibility, mastodon_spoiler
+            )
+        else:  # mode == "reply"
+            return self._run_reply_mode(
+                source_page_id, tone, mastodon_visibility
+            )
+    
+    def _run_post_mode(
+        self,
+        source_page_id: str,
+        platforms: List[str],
+        tone: str,
+        auto_publish: bool,
+        mastodon_visibility: str,
+        mastodon_spoiler: Optional[str]
+    ) -> Dict:
+        """
+        Run workflow in post mode: generate and publish posts
         
         Args:
             source_page_id: Notion page ID containing product description
@@ -181,7 +258,7 @@ class PostWorkflow:
             Dictionary with workflow results
         """
         print("=" * 60)
-        print("🚀 Starting Post Generation Workflow")
+        print("🚀 Starting Post Generation Workflow (Mode: POST)")
         print("=" * 60)
         
         results = {
@@ -331,6 +408,142 @@ class PostWorkflow:
                 print(f"  - {error}")
         
         return results
+    
+    def _run_reply_mode(
+        self,
+        source_page_id: str,
+        tone: str,
+        mastodon_visibility: str
+    ) -> Dict:
+        """
+        Run workflow in reply mode: find and reply to related posts
+        
+        Args:
+            source_page_id: Notion page ID containing product description
+            tone: Tone for replies (engaging, professional, casual, etc.)
+            mastodon_visibility: Mastodon reply visibility (public, unlisted, private, direct)
+        
+        Returns:
+            Dictionary with workflow results
+        """
+        print("=" * 60)
+        print("🚀 Starting Auto Reply Workflow (Mode: REPLY)")
+        print("=" * 60)
+        
+        results = {
+            "source_page_id": source_page_id,
+            "mode": "reply",
+            "posted_replies": [],
+            "errors": []
+        }
+        
+        # Step 1: Fetch product description from Notion
+        print("\n📖 Step 1: Fetching product description from Notion...")
+        print(f"   Source page ID: {source_page_id}")
+        
+        product_description = self.notion_agent.fetch_page_content(source_page_id)
+        
+        if not product_description:
+            error = "Failed to fetch product description from Notion"
+            print(f"✗ {error}")
+            results["errors"].append(error)
+            return results
+        
+        print(f"✓ Successfully fetched product description ({len(product_description)} characters)")
+        print(f"\nPreview:")
+        print("-" * 60)
+        preview = product_description[:200] + "..." if len(product_description) > 200 else product_description
+        print(preview)
+        print("-" * 60)
+        
+        # Step 2: Extract keywords and search for related posts
+        print("\n🔍 Step 2: Finding related posts to reply to...")
+        
+        # Extract keywords from product description
+        keywords = self._extract_keywords(product_description)
+        print(f"   Extracted keywords: {', '.join(keywords[:3])}...")
+        
+        # Search for posts using first keyword
+        if not keywords:
+            error = "Could not extract keywords from product description"
+            print(f"✗ {error}")
+            results["errors"].append(error)
+            return results
+        
+        search_query = keywords[0]
+        print(f"   Searching for posts with keyword: {search_query}")
+        
+        related_posts = self.mastodon_agent.search_posts(query=search_query, limit=5)
+        
+        if not related_posts:
+            print("ℹ️  No related posts found to reply to")
+            return results
+        
+        print(f"✓ Found {len(related_posts)} related posts")
+        
+        # Step 3: Generate replies using structured output
+        print("\n🤖 Step 3: Generating replies using AI...")
+        print(f"   Model: {self.openrouter_client.model}")
+        print(f"   Tone: {tone}")
+        
+        replies = self.openrouter_client.generate_replies_batch(
+            product_description=product_description,
+            posts=related_posts,
+            tone=tone
+        )
+        
+        if not replies:
+            error = "Failed to generate replies"
+            print(f"✗ {error}")
+            results["errors"].append(error)
+            return results
+        
+        print(f"✓ Generated {len(replies)} replies")
+        
+        # Step 4: Post replies
+        print("\n📤 Step 4: Posting replies...")
+        print(f"   Visibility: {mastodon_visibility}")
+        
+        posted_replies = []
+        for reply_data in replies:
+            post_id = reply_data.get('post_id')
+            reply_text = reply_data.get('reply')
+            
+            if post_id and reply_text:
+                try:
+                    reply_status = self.mastodon_agent.reply_to_status(
+                        status_id=int(post_id),
+                        content=reply_text,
+                        visibility=mastodon_visibility
+                    )
+                    if reply_status:
+                        posted_replies.append({
+                            'post_id': post_id,
+                            'reply_text': reply_text,
+                            'status_id': reply_status.get('id'),
+                            'url': reply_status.get('url')
+                        })
+                        print(f"  ✓ Replied to post {post_id}")
+                except Exception as e:
+                    error = f"Failed to reply to post {post_id}: {e}"
+                    print(f"  ✗ {error}")
+                    results["errors"].append(error)
+        
+        results["posted_replies"] = posted_replies
+        print(f"\n✓ Posted {len(posted_replies)} replies successfully")
+        
+        # Summary
+        print("\n" + "=" * 60)
+        print("✅ Auto Reply Workflow Complete!")
+        print("=" * 60)
+        print(f"Posted replies: {len(posted_replies)}/{len(replies)}")
+        
+        if results["errors"]:
+            print(f"\n⚠️ Errors: {len(results['errors'])}")
+            for error in results["errors"]:
+                print(f"  - {error}")
+        
+        return results
 
 
 def main():
@@ -406,7 +619,8 @@ def main():
         print("Set it in .config/openrouter_config.json or OPENROUTER_API_KEY environment variable")
         sys.exit(1)
     
-    # Get workflow settings first (need platforms to check if mastodon is needed)
+    # Get workflow settings
+    mode = workflow_config.get('mode', 'post')
     source_page_id = workflow_config.get('source_page_id')
     platforms = workflow_config.get('platforms', ['twitter', 'linkedin', 'instagram'])
     tone = workflow_config.get('tone', 'engaging')
@@ -424,8 +638,25 @@ def main():
         print("Error: source_page_id is required in workflow_config.json")
         sys.exit(1)
     
-    # Check if Mastodon is in platforms - only require credentials if it is
-    if "mastodon" in platforms:
+    # Validate mode
+    if mode not in ['post', 'reply']:
+        print(f"Error: Invalid mode '{mode}' in workflow_config.json")
+        print("Mode must be 'post' (generate and publish posts) or 'reply' (find and reply to posts)")
+        sys.exit(1)
+    
+    # Check Mastodon credentials based on mode
+    if mode == 'reply':
+        # Reply mode always requires Mastodon credentials
+        if not mastodon_instance_url:
+            print("Error: Mastodon instance URL is required (mode is 'reply')")
+            print("Set it in .config/mastodon_config.json or MASTODON_INSTANCE_URL environment variable")
+            sys.exit(1)
+        
+        if not mastodon_access_token:
+            print("Error: Mastodon access token is required (mode is 'reply')")
+            print("Set it in .config/mastodon_config.json or MASTODON_ACCESS_TOKEN environment variable")
+            sys.exit(1)
+    elif "mastodon" in platforms:
         if not mastodon_instance_url:
             print("Error: Mastodon instance URL is required (mastodon is in platforms)")
             print("Set it in .config/mastodon_config.json or MASTODON_INSTANCE_URL environment variable")
@@ -493,14 +724,15 @@ def main():
         
         print("\n✓ All credentials verified successfully!\n")
     
-    # Run workflow
+    # Run workflow based on mode
     results = workflow.run(
         source_page_id=source_page_id,
-        platforms=platforms,
+        mode=mode,
+        platforms=platforms if mode == 'post' else [],
         tone=tone,
-        auto_publish=auto_publish,
+        auto_publish=auto_publish if mode == 'post' else False,
         mastodon_visibility=mastodon_visibility,
-        mastodon_spoiler=mastodon_spoiler
+        mastodon_spoiler=mastodon_spoiler if mode == 'post' else None
     )
     
     # Exit with error code if there were errors
