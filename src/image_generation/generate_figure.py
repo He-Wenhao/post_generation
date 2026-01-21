@@ -5,23 +5,62 @@ Generates images from text prompts without training functionality.
 """
 
 import os
+import json
+from pathlib import Path
 import replicate
-from typing import Optional, List
+from typing import Optional, Dict
 
 
-def setup_replicate(api_key: Optional[str] = None):
+def load_config(config_path: Optional[str] = None) -> Dict:
+    """
+    Load Replicate configuration from JSON file.
+    
+    Args:
+        config_path: Path to config file. If None, uses .config/replicate_config.json
+    
+    Returns:
+        Dictionary with config values
+    
+    Raises:
+        FileNotFoundError: If config file doesn't exist
+        ValueError: If config file is invalid
+    """
+    if config_path is None:
+        # Get the project root (assuming this file is in src/image_generation/)
+        project_root = Path(__file__).parent.parent.parent
+        config_path = project_root / ".config" / "replicate_config.json"
+    else:
+        config_path = Path(config_path)
+    
+    if not config_path.exists():
+        raise FileNotFoundError(
+            f"Config file not found at {config_path}. "
+            f"Please copy .config/replicate_config.json.example to .config/replicate_config.json "
+            f"and fill in your credentials."
+        )
+    
+    with open(config_path, 'r', encoding='utf-8') as f:
+        config = json.load(f)
+    
+    return config
+
+
+def setup_replicate(api_key: Optional[str] = None, config: Optional[Dict] = None):
     """
     Setup Replicate API key.
     
     Args:
-        api_key: Replicate API key. If None, will use REPLICATE_API_TOKEN env var.
+        api_key: Replicate API key. If None, will try config file or REPLICATE_API_TOKEN env var.
+        config: Optional config dictionary. If provided, will use api_key from config.
     """
     if api_key:
         os.environ["REPLICATE_API_TOKEN"] = api_key
+    elif config and config.get("api_key"):
+        os.environ["REPLICATE_API_TOKEN"] = config["api_key"]
     elif not os.environ.get("REPLICATE_API_TOKEN"):
         raise ValueError(
-            "Replicate API key not found. Please set REPLICATE_API_TOKEN environment variable "
-            "or pass api_key parameter."
+            "Replicate API key not found. Please set REPLICATE_API_TOKEN environment variable, "
+            "pass api_key parameter, or configure .config/replicate_config.json"
         )
 
 
@@ -31,7 +70,8 @@ def generate_image(
     num_inference_steps: int = 28,
     guidance_scale: float = 7.5,
     model_type: str = "dev",
-    api_key: Optional[str] = None
+    api_key: Optional[str] = None,
+    config: Optional[Dict] = None
 ) -> str:
     """
     Generate an image from a text prompt using Replicate's Flux model.
@@ -46,7 +86,8 @@ def generate_image(
         guidance_scale: How much attention the model pays to the prompt (1-50).
                        Higher values = more adherence to prompt.
         model_type: Type of model to use. "dev" for quality, "schnell" for speed.
-        api_key: Optional Replicate API key. If None, uses environment variable.
+        api_key: Optional Replicate API key. If None, uses config or environment variable.
+        config: Optional config dictionary. If provided, will use api_key from config.
     
     Returns:
         URL of the generated image
@@ -55,7 +96,7 @@ def generate_image(
         >>> url = generate_image("A photo of a dog in a space shuttle")
         >>> print(url)
     """
-    setup_replicate(api_key)
+    setup_replicate(api_key, config)
     
     input_params = {
         "prompt": prompt,
@@ -78,7 +119,8 @@ def generate_image_finetuned(
     num_inference_steps: int = 28,
     guidance_scale: float = 7.5,
     model_type: str = "dev",
-    api_key: Optional[str] = None
+    api_key: Optional[str] = None,
+    config: Optional[Dict] = None
 ) -> str:
     """
     Generate an image using a fine-tuned model.
@@ -92,12 +134,13 @@ def generate_image_finetuned(
         num_inference_steps: Number of inference steps
         guidance_scale: How much attention the model pays to the prompt
         model_type: Type of model to use ("dev" or "schnell")
-        api_key: Optional Replicate API key
+        api_key: Optional Replicate API key. If None, uses config or environment variable.
+        config: Optional config dictionary. If provided, will use api_key from config.
     
     Returns:
         URL of the generated image
     """
-    setup_replicate(api_key)
+    setup_replicate(api_key, config)
     
     # Get the latest version of the model
     model = replicate.models.get(owner=model_owner, name=model_name)
@@ -123,8 +166,13 @@ def generate_image_finetuned(
 
 
 if __name__ == "__main__":
-    # Example usage
-    REPLICATE_API_KEY = #"YOUR_API_KEY_HERE"
+    # Load configuration
+    try:
+        config = load_config()
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
+        exit(1)
+    
     # Option 1: Generate with base model
     print("Generating image with base Flux model...")
     '''
@@ -133,20 +181,21 @@ if __name__ == "__main__":
         num_inference_steps=28,
         guidance_scale=7.5,
         model_type="dev",
-        api_key=REPLICATE_API_KEY
+        config=config
     )
     print(f"Generated image URL: {image_url}")
     '''
-    # Option 2: Generate with fine-tuned model (uncomment and fill in details)
-    # print("\nGenerating image with fine-tuned model...")
+    
+    # Option 2: Generate with fine-tuned model
+    print("\nGenerating image with fine-tuned model...")
     image_url = generate_image_finetuned(
         prompt="smiled at me in a space shuttle",
-        model_owner="sundai-club",
-        model_name="lty_model",
-        trigger_word="lty",
+        model_owner=config.get("replicate_username", "sundai-club"),
+        model_name=config.get("finetuned_model_name", "lty_model"),
+        trigger_word=config.get("trigger_word", "lty"),
         num_inference_steps=28,
         guidance_scale=7.5,
         model_type="dev",
-        api_key=REPLICATE_API_KEY
+        config=config
     )
     print(f"Generated image URL: {image_url}")

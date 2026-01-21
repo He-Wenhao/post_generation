@@ -1,0 +1,6 @@
+{
+  "api_key": "your-replicate-api-key",
+  "replicate_username": "sundai-club",
+  "finetuned_model_name": "your-model-name",
+  "trigger_word": "your-trigger-word"
+}

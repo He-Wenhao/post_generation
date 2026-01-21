@@ -22,17 +22,68 @@ More in depth fine tuning explanation:
 """
 
 #@title 0.A Install replicate library
-!pip install replicate
+# Note: Install replicate library with: pip install replicate
+# !pip install replicate  # Jupyter notebook syntax - not valid in regular Python
 
 """# 0.B Setup Replicate"""
 
-# TODO: add your API key
-# REPLICATE_API_KEY = "<FILL_THIS_IN>" # You will find this on your Replicate Profile (https://replicate.com/account/api-tokens)
-REPLICATE_API_KEY = #"YOUR_API_KEY_HERE"
-
 import os
+import json
+from pathlib import Path
 import replicate
 from IPython.display import Image, display
+
+
+def load_config(config_path=None):
+    """
+    Load Replicate configuration from JSON file.
+    
+    Args:
+        config_path: Path to config file. If None, uses .config/replicate_config.json
+    
+    Returns:
+        Dictionary with config values
+    
+    Raises:
+        FileNotFoundError: If config file doesn't exist
+        ValueError: If config file is invalid
+    """
+    if config_path is None:
+        # Get the project root (assuming this file is in src/image_generation/)
+        project_root = Path(__file__).parent.parent.parent
+        config_path = project_root / ".config" / "replicate_config.json"
+    else:
+        config_path = Path(config_path)
+    
+    if not config_path.exists():
+        raise FileNotFoundError(
+            f"Config file not found at {config_path}. "
+            f"Please copy .config/replicate_config.json.example to .config/replicate_config.json "
+            f"and fill in your credentials."
+        )
+    
+    with open(config_path, 'r', encoding='utf-8') as f:
+        config = json.load(f)
+    
+    return config
+
+
+# Load configuration
+try:
+    config = load_config()
+    REPLICATE_API_KEY = config.get("api_key")
+    if not REPLICATE_API_KEY:
+        raise ValueError("api_key not found in config file")
+except FileNotFoundError as e:
+    print(f"Error: {e}")
+    print("Falling back to environment variable REPLICATE_API_TOKEN")
+    REPLICATE_API_KEY = os.environ.get("REPLICATE_API_TOKEN")
+    if not REPLICATE_API_KEY:
+        raise ValueError(
+            "Replicate API key not found. Please set REPLICATE_API_TOKEN environment variable "
+            "or configure .config/replicate_config.json"
+        )
+    config = {}
 
 # Make the API Key available
 os.environ["REPLICATE_API_TOKEN"] = REPLICATE_API_KEY
@@ -88,12 +139,12 @@ from replicate.exceptions import ReplicateError
 # You can see your username on replicate in the top left corner.
 
 # NOTE: we use sundai-club account name because you logged via Sundai org
-replicate_username = "sundai-club"
+# Load from config if available, otherwise use default
+replicate_username = config.get("replicate_username", "sundai-club")
 # TODO: Name of your fintuned model
 # Consult: https://replicate.com/models to see what names have already been used. Do not collide with an existing name
 # Should be one word, no spaces. Can use underscores to combine words
-# finetuned_mode_name = "<FILL_THIS_IN_WITH_A_UNIQUE_VALUE>"
-finetuned_mode_name = "lty_model" # Name of your model goes here
+finetuned_mode_name = config.get("finetuned_model_name", "lty_model")  # Name of your model goes here
 
 try:
   model = replicate.models.create(
@@ -126,7 +177,8 @@ import os; print(f"{os.path.getsize('/content/lty_photos_2.zip')/1024/1024:.2f} 
 
 # TODO: upload your dataset and put its name here
 dataset_path = "/content/lty_photos_2.zip"
-trigger_word = "lty"# TODO: pick your trigget word
+# Load trigger word from config if available
+trigger_word = config.get("trigger_word", "lty")  # TODO: pick your trigger word
 steps = 1000 # keep the number of steps at 1000
 
 training = replicate.trainings.create(
