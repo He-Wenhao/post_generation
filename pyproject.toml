@@ -1,0 +1,29 @@
+[project]
+name = "post-generation"
+version = "0.1.0"
+description = "Marketing content generation and Mastodon posting tools for DailyTopArxiv"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "Mastodon.py>=1.8.0",
+    "notion-client>=2.2.1",
+    "requests>=2.31.0",
+]
+
+[project.optional-dependencies]
+dev = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = []
+
+# Configure hatchling for script-based project (no package structure)
+[tool.hatch.build.targets.wheel]
+packages = []
+only-include = [
+    "mastodon_agent.py",
+    "notion_agent.py",
+]

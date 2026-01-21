@@ -1,0 +1,33 @@
+# Config files - NEVER commit these!
+.config/
+!.config/*.example
+
+# Temporary/post scripts folder (for testing)
+post_scripts/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+
+# uv
+.uv/
+# Note: uv.lock should be committed for reproducible builds
+# Uncomment the line below if you don't want to commit it:
+# uv.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
