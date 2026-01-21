@@ -19,9 +19,7 @@ env/
 
 # uv
 .uv/
-# Note: uv.lock should be committed for reproducible builds
-# Uncomment the line below if you don't want to commit it:
-# uv.lock
+uv.lock
 
 # IDE
 .vscode/
