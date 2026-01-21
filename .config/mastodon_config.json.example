@@ -1,0 +1,6 @@
+{
+  "instance_url": "https://mastodon.social",
+  "access_token": "your-mastodon-access-token",
+  "client_id": "your-mastodon-client-id",
+  "client_secret": "your-mastodon-client-secret"
+}

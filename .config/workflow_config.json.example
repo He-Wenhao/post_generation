@@ -1,0 +1,13 @@
+{
+  "mode": "post",
+  "source_page_id": "your-notion-page-id-with-product-description",
+  "platforms": ["twitter", "linkedin", "instagram"],
+  "tone": "engaging",
+  "openrouter_model": "openai/gpt-4o-mini",
+  "mastodon": {
+    "enabled": true,
+    "visibility": "public",
+    "spoiler_text": null
+  },
+  "auto_publish": false
+}

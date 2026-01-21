@@ -1,0 +1,4 @@
+{
+  "api_token": "your-notion-api-token",
+  "default_parent_id": "your-notion-default-parent-page-id"
+}
