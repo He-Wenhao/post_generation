@@ -124,7 +124,7 @@ def generate_image_finetuned(
 
 if __name__ == "__main__":
     # Example usage
-    REPLICATE_API_KEY = "YOUR_API_KEY_HERE"
+    REPLICATE_API_KEY = #"YOUR_API_KEY_HERE"
     # Option 1: Generate with base model
     print("Generating image with base Flux model...")
     '''

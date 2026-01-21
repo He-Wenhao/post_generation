@@ -28,7 +28,7 @@ More in depth fine tuning explanation:
 
 # TODO: add your API key
 # REPLICATE_API_KEY = "<FILL_THIS_IN>" # You will find this on your Replicate Profile (https://replicate.com/account/api-tokens)
-REPLICATE_API_KEY = "YOUR_API_KEY_HERE"
+REPLICATE_API_KEY = #"YOUR_API_KEY_HERE"
 
 import os
 import replicate
