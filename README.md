@@ -142,3 +142,176 @@ Automatically generate images for your posts:
 - **`approval_mode`**: `"cmd"` (terminal) or `"telegram"` (Telegram bot)
 - **`telegram_trigger`**: `null` (start immediately) or message string (wait for trigger)
 - **`auto_publish`**: `false` (ask for approval) or `true` (publish automatically)
+
+## 🚀 Deployment to GCP VM
+
+Deploy this project to a Google Cloud Platform VM instance as a systemd service that runs continuously and listens for Telegram triggers.
+
+### Prerequisites
+
+- Google Cloud SDK (gcloud CLI) installed and authenticated
+- A GCP project with Compute Engine API enabled
+- A VM instance created (e.g., `sundai-vm`)
+- Git repository URL (for automatic deployment)
+
+### Quick Deployment
+
+1. **Set environment variables** (optional, for customization):
+   ```bash
+   export VM_NAME="sundai-vm"
+   export VM_ZONE="asia-southeast1-a"
+   export GCP_PROJECT="alien-hour-485119-k1"
+   export GIT_REPO_URL="https://github.com/yourusername/post_generation.git"
+   ```
+
+2. **Run the deployment script from your local machine**:
+   ```bash
+   bash deploy/deploy_from_local.sh
+   ```
+
+   This script will:
+   - Upload deployment scripts to the VM
+   - Install system dependencies (Python, git, uv)
+   - Clone/update the repository
+   - Install Python dependencies
+   - Set up systemd service
+   - Generate configuration file templates
+
+3. **Upload your configuration files**:
+   ```bash
+   gcloud compute scp --zone=asia-southeast1-a .config/* sundai-vm:~/post_generation/.config/
+   ```
+
+4. **Start the service**:
+   ```bash
+   gcloud compute ssh sundai-vm --zone=asia-southeast1-a --command="sudo systemctl start post-generation"
+   ```
+
+5. **Enable auto-start on boot** (already done by setup script):
+   ```bash
+   gcloud compute ssh sundai-vm --zone=asia-southeast1-a --command="sudo systemctl enable post-generation"
+   ```
+
+### Manual Deployment Steps
+
+If you prefer to deploy manually:
+
+1. **SSH into the VM**:
+   ```bash
+   gcloud compute ssh sundai-vm --zone=asia-southeast1-a
+   ```
+
+2. **Run environment setup**:
+   ```bash
+   bash deploy/setup_environment.sh
+   ```
+
+3. **Deploy the code**:
+   ```bash
+   export GIT_REPO_URL="https://github.com/yourusername/post_generation.git"
+   bash deploy/deploy.sh
+   ```
+
+4. **Generate configuration templates**:
+   ```bash
+   bash deploy/config_template.sh
+   ```
+
+5. **Edit configuration files** with your actual credentials:
+   ```bash
+   nano ~/post_generation/.config/notion_config.json
+   nano ~/post_generation/.config/openrouter_config.json
+   nano ~/post_generation/.config/mastodon_config.json
+   nano ~/post_generation/.config/telegram_config.json
+   nano ~/post_generation/.config/workflow_config.json
+   ```
+
+6. **Set up systemd service**:
+   ```bash
+   bash deploy/setup_systemd.sh
+   ```
+
+7. **Start the service**:
+   ```bash
+   sudo systemctl start post-generation
+   ```
+
+### Service Management
+
+Once deployed, manage the service using systemctl:
+
+```bash
+# Start the service
+sudo systemctl start post-generation
+
+# Stop the service
+sudo systemctl stop post-generation
+
+# Restart the service
+sudo systemctl restart post-generation
+
+# Check service status
+sudo systemctl status post-generation
+
+# View real-time logs
+sudo journalctl -u post-generation -f
+
+# View recent logs
+sudo journalctl -u post-generation -n 100
+
+# Disable auto-start on boot
+sudo systemctl disable post-generation
+```
+
+### Logs
+
+Service logs are stored in:
+- **Service output**: `/var/log/post-generation/service.log`
+- **Error output**: `/var/log/post-generation/error.log`
+- **Systemd logs**: Use `journalctl -u post-generation` to view
+
+### Updating the Deployment
+
+To update the code on the VM:
+
+1. **Push changes to your Git repository**
+
+2. **SSH into the VM and pull updates**:
+   ```bash
+   gcloud compute ssh sundai-vm --zone=asia-southeast1-a
+   cd ~/post_generation
+   git pull
+   ```
+
+3. **Reinstall dependencies** (if `pyproject.toml` changed):
+   ```bash
+   export PATH="$HOME/.cargo/bin:$PATH"
+   uv sync
+   ```
+
+4. **Restart the service**:
+   ```bash
+   sudo systemctl restart post-generation
+   ```
+
+### Troubleshooting
+
+**Service won't start:**
+- Check service status: `sudo systemctl status post-generation`
+- Check logs: `sudo journalctl -u post-generation -n 50`
+- Verify configuration files exist in `~/post_generation/.config/`
+- Verify `uv` is installed: `which uv` or `~/.cargo/bin/uv --version`
+
+**Service keeps restarting:**
+- Check error logs: `cat /var/log/post-generation/error.log`
+- Verify all required configuration files are present and valid JSON
+- Check that all API credentials are correct
+
+**Can't connect to Telegram:**
+- Verify `telegram_config.json` has correct bot token and chat ID
+- Check network connectivity from VM
+- Ensure firewall rules allow outbound connections
+
+**Permission errors:**
+- Ensure log directory has correct permissions: `sudo chown $USER:$USER /var/log/post-generation`
+- Check that service user matches the user who owns the project directory
