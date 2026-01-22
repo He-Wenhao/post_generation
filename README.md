@@ -1,6 +1,16 @@
 # Post Generation Tools for DailyTopArxiv
 
-Automated workflow to pull product descriptions from Notion, generate social media posts using AI (OpenRouter), automatically generate images, and publish to Mastodon. Supports two modes: **Post Mode** (generate and publish posts) and **Reply Mode** (find and reply to related posts).
+🤖 **AI-Powered Social Media Automation** - Automatically generate engaging posts from Notion content using advanced AI models
+
+🎨 **AI Image Generation** - Create stunning visuals for your posts with Flux model
+
+📱 **Multi-Platform Publishing** - Seamlessly publish to Mastodon with images attached
+
+🔔 **Telegram Integration** - Remote approval and on-demand triggering via Telegram bot
+
+✨ **Smart Reply Mode** - Automatically find and engage with relevant posts on Mastodon
+
+🎯 **Human-in-the-Loop** - Full control with approval workflows before publishing
 
 ## 🚀 Quick Start
 
