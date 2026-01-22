@@ -156,15 +156,32 @@ Deploy this project to a Google Cloud Platform VM instance as a systemd service 
 
 ### Quick Deployment
 
+#### For Windows (PowerShell)
+
+1. **Set environment variables** (optional, for customization):
+   ```powershell
+   $env:VM_NAME = "sundai-vm"
+   $env:VM_ZONE = "asia-southeast1-a"
+   $env:GCP_PROJECT = "alien-hour-485119-k1"
+   $env:GIT_REPO_URL = "https://github.com/He-Wenhao/post_generation.git"
+   ```
+
+2. **Run the PowerShell deployment script**:
+   ```powershell
+   .\deploy\deploy_from_local.ps1
+   ```
+
+#### For Linux/macOS (Bash)
+
 1. **Set environment variables** (optional, for customization):
    ```bash
    export VM_NAME="sundai-vm"
    export VM_ZONE="asia-southeast1-a"
    export GCP_PROJECT="alien-hour-485119-k1"
-   export GIT_REPO_URL="https://github.com/yourusername/post_generation.git"
+   export GIT_REPO_URL="https://github.com/He-Wenhao/post_generation.git"
    ```
 
-2. **Run the deployment script from your local machine**:
+2. **Run the bash deployment script**:
    ```bash
    bash deploy/deploy_from_local.sh
    ```

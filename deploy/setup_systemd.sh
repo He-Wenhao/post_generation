@@ -27,8 +27,20 @@ if [ ! -f "$DEPLOY_DIR/$SERVICE_FILE" ]; then
     exit 1
 fi
 
+# Determine uv path (check both common locations)
+UV_PATH=""
+if [ -f "$HOME_DIR/.local/bin/uv" ]; then
+    UV_PATH="$HOME_DIR/.local/bin/uv"
+elif [ -f "$HOME_DIR/.cargo/bin/uv" ]; then
+    UV_PATH="$HOME_DIR/.cargo/bin/uv"
+else
+    echo "⚠️  Warning: uv not found in common locations, using ~/.local/bin/uv as default"
+    UV_PATH="$HOME_DIR/.local/bin/uv"
+fi
+
 # Create systemd service file with user and home directory substituted
 echo "📝 Creating systemd service file..."
+echo "   Using uv at: $UV_PATH"
 sudo tee /etc/systemd/system/post-generation.service > /dev/null <<EOF
 [Unit]
 Description=Post Generation Telegram Bot Service
@@ -38,8 +50,8 @@ After=network.target
 Type=simple
 User=$USER
 WorkingDirectory=$PROJECT_DIR
-Environment="PATH=$HOME_DIR/.cargo/bin:/usr/local/bin:/usr/bin:/bin"
-ExecStart=$HOME_DIR/.cargo/bin/uv run python src/post_workflow.py
+Environment=PATH=$HOME_DIR/.local/bin:$HOME_DIR/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=$UV_PATH run python src/post_workflow.py
 Restart=always
 RestartSec=10
 StandardOutput=append:/var/log/post-generation/service.log

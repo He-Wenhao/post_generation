@@ -36,20 +36,30 @@ if ! command -v curl &> /dev/null; then
 fi
 
 # Install uv (Python package manager)
-if ! command -v uv &> /dev/null; then
+# uv installs to ~/.local/bin by default, or ~/.cargo/bin if using cargo
+if ! command -v uv &> /dev/null && [ ! -f "$HOME/.local/bin/uv" ] && [ ! -f "$HOME/.cargo/bin/uv" ]; then
     echo "Installing uv..."
     curl -LsSf https://astral.sh/uv/install.sh | sh
-    export PATH="$HOME/.cargo/bin:$PATH"
+    # uv installs to ~/.local/bin by default
+    export PATH="$HOME/.local/bin:$PATH"
     # Add to bashrc for persistence
-    if ! grep -q 'export PATH="$HOME/.cargo/bin:$PATH"' ~/.bashrc; then
+    if ! grep -q 'export PATH="$HOME/.local/bin:$PATH"' ~/.bashrc; then
+        echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+    fi
+    # Also check for cargo bin (in case it was installed there)
+    if [ -d "$HOME/.cargo/bin" ] && ! grep -q 'export PATH="$HOME/.cargo/bin:$PATH"' ~/.bashrc; then
         echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.bashrc
     fi
 else
     echo "✓ uv is already installed"
 fi
 
-# Ensure uv is in PATH for current session
-export PATH="$HOME/.cargo/bin:$PATH"
+# Ensure uv is in PATH for current session (check both locations)
+if [ -f "$HOME/.local/bin/uv" ]; then
+    export PATH="$HOME/.local/bin:$PATH"
+elif [ -f "$HOME/.cargo/bin/uv" ]; then
+    export PATH="$HOME/.cargo/bin:$PATH"
+fi
 
 # Create log directory
 echo "📁 Creating log directory..."
