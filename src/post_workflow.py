@@ -11,6 +11,7 @@ This script orchestrates the complete workflow:
 import os
 import sys
 import json
+import asyncio
 from pathlib import Path
 from typing import Optional, List, Dict
 
@@ -98,6 +99,14 @@ except ImportError as e:
     # #endregion
     raise
 
+# Optional import for Telegram approval
+try:
+    from telegram_agent import TelegramApprovalAgent, load_config as load_telegram_config
+    TELEGRAM_AVAILABLE = True
+except ImportError:
+    TELEGRAM_AVAILABLE = False
+    load_telegram_config = None
+
 
 def load_workflow_config(config_path: str = ".config/workflow_config.json") -> dict:
     """Load workflow configuration from JSON file"""
@@ -135,7 +144,8 @@ class PostWorkflow:
         openrouter_api_key: str,
         mastodon_instance_url: str,
         mastodon_access_token: str,
-        openrouter_model: str = "openai/gpt-4o-mini"
+        openrouter_model: str = "openai/gpt-4o-mini",
+        telegram_agent: Optional[object] = None
     ):
         """
         Initialize the workflow
@@ -146,6 +156,7 @@ class PostWorkflow:
             mastodon_instance_url: Mastodon instance URL
             mastodon_access_token: Mastodon access token
             openrouter_model: Model to use for generation
+            telegram_agent: Optional TelegramApprovalAgent instance for Telegram approval
         """
         self.notion_agent = NotionAgent(api_token=notion_api_token)
         self.openrouter_client = OpenRouterClient(
@@ -156,6 +167,7 @@ class PostWorkflow:
             instance_url=mastodon_instance_url,
             access_token=mastodon_access_token
         )
+        self.telegram_agent = telegram_agent
     
     def _extract_keywords(self, description: str) -> List[str]:
         """
@@ -204,7 +216,8 @@ class PostWorkflow:
         tone: str = "engaging",
         auto_publish: bool = False,
         mastodon_visibility: str = "public",
-        mastodon_spoiler: Optional[str] = None
+        mastodon_spoiler: Optional[str] = None,
+        approval_mode: str = "cmd"
     ) -> Dict:
         """
         Run the complete workflow
@@ -217,6 +230,7 @@ class PostWorkflow:
             auto_publish: If True, publish without confirmation - used in both "post" and "reply" modes
             mastodon_visibility: Mastodon post visibility (public, unlisted, private, direct)
             mastodon_spoiler: Optional spoiler/content warning text - only used in "post" mode
+            approval_mode: Approval method - "cmd" (command line) or "telegram" (Telegram bot)
         
         Returns:
             Dictionary with workflow results
@@ -224,14 +238,20 @@ class PostWorkflow:
         if mode not in ["post", "reply"]:
             raise ValueError(f"Invalid mode: {mode}. Must be 'post' or 'reply'")
         
+        if approval_mode not in ["cmd", "telegram"]:
+            raise ValueError(f"Invalid approval_mode: {approval_mode}. Must be 'cmd' or 'telegram'")
+        
+        if approval_mode == "telegram" and not self.telegram_agent:
+            raise ValueError("Telegram approval mode requires telegram_agent to be initialized")
+        
         if mode == "post":
             return self._run_post_mode(
                 source_page_id, platforms or [], tone, 
-                auto_publish, mastodon_visibility, mastodon_spoiler
+                auto_publish, mastodon_visibility, mastodon_spoiler, approval_mode
             )
         else:  # mode == "reply"
             return self._run_reply_mode(
-                source_page_id, tone, auto_publish, mastodon_visibility
+                source_page_id, tone, auto_publish, mastodon_visibility, approval_mode
             )
     
     def _run_post_mode(
@@ -241,7 +261,8 @@ class PostWorkflow:
         tone: str,
         auto_publish: bool,
         mastodon_visibility: str,
-        mastodon_spoiler: Optional[str]
+        mastodon_spoiler: Optional[str],
+        approval_mode: str
     ) -> Dict:
         """
         Run workflow in post mode: generate and publish posts
@@ -319,6 +340,7 @@ class PostWorkflow:
         
         # Step 2.5: Review and approve/regenerate posts
         print("\n📝 Step 2.5: Review and approve posts...")
+        print(f"   Approval mode: {approval_mode}")
         approved_posts = {}
         
         for platform in platforms:
@@ -328,38 +350,67 @@ class PostWorkflow:
             current_post = generated_posts[platform]
             
             while True:
-                print(f"\n{platform.upper()} Post:")
-                print("-" * 60)
-                print(current_post)
-                print("-" * 60)
+                if approval_mode == "cmd":
+                    # Command-line approval
+                    print(f"\n{platform.upper()} Post:")
+                    print("-" * 60)
+                    print(current_post)
+                    print("-" * 60)
+                    
+                    response = input(f"Accept this {platform} post or regenerate? (a/r): ").lower().strip()
+                    
+                    if response == 'a':
+                        approved_posts[platform] = current_post
+                        print(f"✓ Accepted {platform} post")
+                        break
+                    elif response == 'r':
+                        print(f"\n   Regenerating {platform} post...")
+                        new_post = self.openrouter_client.generate_post(
+                            product_description=product_description,
+                            platform=platform,
+                            tone=tone
+                        )
+                        
+                        if new_post:
+                            current_post = new_post
+                            print(f"✓ Regenerated {platform} post ({len(new_post)} characters)")
+                        else:
+                            error = f"Failed to regenerate post for {platform}"
+                            print(f"✗ {error}")
+                            results["errors"].append(error)
+                            print("   Keeping previous version. Please try again.")
+                    else:
+                        print("Invalid input. Please enter 'a' to accept or 'r' to regenerate.")
                 
-                response = input(f"Accept this {platform} post or regenerate? (a/r): ").lower().strip()
-                
-                if response == 'a':
-                    # Accept the post
-                    approved_posts[platform] = current_post
-                    print(f"✓ Accepted {platform} post")
-                    break
-                elif response == 'r':
-                    # Regenerate the post
-                    print(f"\n   Regenerating {platform} post...")
-                    new_post = self.openrouter_client.generate_post(
-                        product_description=product_description,
-                        platform=platform,
-                        tone=tone
+                else:  # approval_mode == "telegram"
+                    # Telegram approval
+                    decision = asyncio.run(
+                        self.telegram_agent.wait_for_post_approval(
+                            platform=platform,
+                            post_content=current_post
+                        )
                     )
                     
-                    if new_post:
-                        current_post = new_post
-                        print(f"✓ Regenerated {platform} post ({len(new_post)} characters)")
-                    else:
-                        error = f"Failed to regenerate post for {platform}"
-                        print(f"✗ {error}")
-                        results["errors"].append(error)
-                        # Keep the old post and ask again
-                        print("   Keeping previous version. Please try again.")
-                else:
-                    print("Invalid input. Please enter 'a' to accept or 'r' to regenerate.")
+                    if decision == "accept":
+                        approved_posts[platform] = current_post
+                        print(f"✓ Accepted {platform} post via Telegram")
+                        break
+                    elif decision == "regenerate":
+                        print(f"\n   Regenerating {platform} post...")
+                        new_post = self.openrouter_client.generate_post(
+                            product_description=product_description,
+                            platform=platform,
+                            tone=tone
+                        )
+                        
+                        if new_post:
+                            current_post = new_post
+                            print(f"✓ Regenerated {platform} post ({len(new_post)} characters)")
+                        else:
+                            error = f"Failed to regenerate post for {platform}"
+                            print(f"✗ {error}")
+                            results["errors"].append(error)
+                            print("   Keeping previous version. Please try again.")
         
         results["generated_posts"] = approved_posts
         
@@ -378,15 +429,25 @@ class PostWorkflow:
             print(f"   Visibility: {mastodon_visibility}")
             
             if not auto_publish:
-                print("\nApproved posts:")
-                for platform, post_content in approved_posts.items():
-                    print(f"\n{platform.upper()}:")
-                    print("-" * 60)
-                    print(post_content)
-                    print("-" * 60)
+                if approval_mode == "cmd":
+                    print("\nApproved posts:")
+                    for platform, post_content in approved_posts.items():
+                        print(f"\n{platform.upper()}:")
+                        print("-" * 60)
+                        print(post_content)
+                        print("-" * 60)
+                    
+                    response = input("\nPublish all posts to Mastodon? (y/n): ")
+                    should_publish = response.lower() == 'y'
+                else:  # approval_mode == "telegram"
+                    # Telegram approval
+                    should_publish = asyncio.run(
+                        self.telegram_agent.wait_for_publish_approval(
+                            posts=approved_posts
+                        )
+                    )
                 
-                response = input("\nPublish all posts to Mastodon? (y/n): ")
-                if response.lower() != 'y':
+                if not should_publish:
                     print("Publishing cancelled.")
                     # Continue to show summary even if publishing cancelled
                 else:
@@ -462,7 +523,8 @@ class PostWorkflow:
         source_page_id: str,
         tone: str,
         auto_publish: bool,
-        mastodon_visibility: str
+        mastodon_visibility: str,
+        approval_mode: str
     ) -> Dict:
         """
         Run workflow in reply mode: find and reply to related posts
@@ -555,23 +617,36 @@ class PostWorkflow:
         print(f"   Visibility: {mastodon_visibility}")
         
         if not auto_publish:
-            print("\nGenerated replies:")
-            for i, reply_data in enumerate(replies, 1):
-                post_id = reply_data.get('post_id')
-                reply_text = reply_data.get('reply')
-                original_post = next((p for p in related_posts if str(p.get('id')) == str(post_id)), None)
-                
-                if post_id and reply_text:
-                    print(f"\nReply {i} (to post {post_id}):")
-                    if original_post:
-                        original_content = original_post.get('content', '')[:100]
-                        print(f"  Original post: {original_content}...")
-                    print("-" * 60)
-                    print(reply_text)
-                    print("-" * 60)
+            print(f"   Approval mode: {approval_mode}")
             
-            response = input("\nPost all replies to Mastodon? (y/n): ")
-            if response.lower() != 'y':
+            if approval_mode == "cmd":
+                print("\nGenerated replies:")
+                for i, reply_data in enumerate(replies, 1):
+                    post_id = reply_data.get('post_id')
+                    reply_text = reply_data.get('reply')
+                    original_post = next((p for p in related_posts if str(p.get('id')) == str(post_id)), None)
+                    
+                    if post_id and reply_text:
+                        print(f"\nReply {i} (to post {post_id}):")
+                        if original_post:
+                            original_content = original_post.get('content', '')[:100]
+                            print(f"  Original post: {original_content}...")
+                        print("-" * 60)
+                        print(reply_text)
+                        print("-" * 60)
+                
+                response = input("\nPost all replies to Mastodon? (y/n): ")
+                should_post = response.lower() == 'y'
+            else:  # approval_mode == "telegram"
+                # Telegram approval
+                should_post = asyncio.run(
+                    self.telegram_agent.wait_for_replies_approval(
+                        replies=replies,
+                        related_posts=related_posts
+                    )
+                )
+            
+            if not should_post:
                 print("Posting cancelled.")
                 # Continue to show summary even if posting cancelled
                 posted_replies = []
@@ -686,6 +761,11 @@ def main():
     openrouter_config = load_openrouter_config()
     mastodon_config = load_mastodon_config()
     
+    # Load Telegram config if available
+    telegram_config = {}
+    if load_telegram_config:
+        telegram_config = load_telegram_config()
+    
     # Get credentials
     notion_api_token = (
         notion_config.get('api_token') or
@@ -728,10 +808,50 @@ def main():
         openrouter_config.get('model') 
     )
     auto_publish = workflow_config.get('auto_publish', False)
+    approval_mode = workflow_config.get('approval_mode', 'cmd')
     
     mastodon_settings = workflow_config.get('mastodon', {})
     mastodon_visibility = mastodon_settings.get('visibility', 'public')
     mastodon_spoiler = mastodon_settings.get('spoiler_text')
+    
+    # Validate approval_mode
+    if approval_mode not in ['cmd', 'telegram']:
+        print(f"Error: Invalid approval_mode '{approval_mode}' in workflow_config.json")
+        print("approval_mode must be 'cmd' (command line) or 'telegram' (Telegram bot)")
+        sys.exit(1)
+    
+    # Initialize Telegram agent if needed
+    telegram_agent = None
+    if approval_mode == 'telegram':
+        if not TELEGRAM_AVAILABLE:
+            print("Error: Telegram approval mode requires python-telegram-bot")
+            print("Install it with: pip install python-telegram-bot")
+            sys.exit(1)
+        
+        telegram_bot_token = (
+            telegram_config.get('bot_token') or
+            os.getenv('TELEGRAM_BOT_TOKEN')
+        )
+        telegram_chat_id = (
+            telegram_config.get('chat_id') or
+            os.getenv('TELEGRAM_CHAT_ID')
+        )
+        
+        if not telegram_bot_token:
+            print("Error: Telegram bot token is required (approval_mode is 'telegram')")
+            print("Set it in .config/telegram_config.json or TELEGRAM_BOT_TOKEN environment variable")
+            sys.exit(1)
+        
+        if not telegram_chat_id:
+            print("Error: Telegram chat ID is required (approval_mode is 'telegram')")
+            print("Set it in .config/telegram_config.json or TELEGRAM_CHAT_ID environment variable")
+            sys.exit(1)
+        
+        telegram_agent = TelegramApprovalAgent(
+            bot_token=telegram_bot_token,
+            chat_id=telegram_chat_id
+        )
+        print("✓ Telegram agent initialized")
     
     if not source_page_id:
         print("Error: source_page_id is required in workflow_config.json")
@@ -782,7 +902,8 @@ def main():
             openrouter_api_key=openrouter_api_key,
             mastodon_instance_url=mastodon_instance_url,
             mastodon_access_token=mastodon_access_token,
-            openrouter_model=openrouter_model
+            openrouter_model=openrouter_model,
+            telegram_agent=telegram_agent
         )
         
         # Verify credentials (optional check)
@@ -807,7 +928,8 @@ def main():
             openrouter_api_key=openrouter_api_key,
             mastodon_instance_url=mastodon_instance_url,
             mastodon_access_token=mastodon_access_token,
-            openrouter_model=openrouter_model
+            openrouter_model=openrouter_model,
+            telegram_agent=telegram_agent
         )
         
         # Verify credentials (skip Mastodon if not in platforms)
@@ -831,7 +953,8 @@ def main():
         tone=tone,
         auto_publish=auto_publish,
         mastodon_visibility=mastodon_visibility,
-        mastodon_spoiler=mastodon_spoiler if mode == 'post' else None
+        mastodon_spoiler=mastodon_spoiler if mode == 'post' else None,
+        approval_mode=approval_mode
     )
     
     # Exit with error code if there were errors

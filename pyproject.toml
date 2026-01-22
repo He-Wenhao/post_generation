@@ -8,10 +8,14 @@ dependencies = [
     "Mastodon.py>=1.8.0",
     "notion-client>=2.2.1",
     "requests>=2.31.0",
+    "python-telegram-bot>=20.0",
 ]
 
 [project.optional-dependencies]
 dev = []
+telegram = [
+    "python-telegram-bot>=20.0",
+]
 
 [build-system]
 requires = ["hatchling"]
