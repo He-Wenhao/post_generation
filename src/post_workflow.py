@@ -500,6 +500,16 @@ class PostWorkflow:
                             }
                             print(f"✓ Published {platform} post")
                             print(f"   URL: {status.get('url')}")
+                            
+                            # Send confirmation via Telegram if available
+                            if self.telegram_agent and approval_mode == "telegram":
+                                post_url = status.get('url', 'N/A')
+                                confirmation_msg = (
+                                    f"✅ Post Published Successfully!\n\n"
+                                    f"Platform: {platform.upper()}\n"
+                                    f"URL: {post_url}\n\n"
+                                )
+                                self.telegram_agent.send_confirmation_sync(confirmation_msg)
                         else:
                             error = f"Failed to publish {platform} post"
                             print(f"✗ {error}")
@@ -523,6 +533,17 @@ class PostWorkflow:
                         }
                         print(f"✓ Published {platform} post")
                         print(f"   URL: {status.get('url')}")
+                        
+                        # Send confirmation via Telegram if available
+                        if self.telegram_agent and approval_mode == "telegram":
+                            post_url = status.get('url', 'N/A')
+                            confirmation_msg = (
+                                f"✅ Post Published Successfully!\n\n"
+                                f"Platform: {platform.upper()}\n"
+                                f"URL: {post_url}\n\n"
+                                f"Content:\n{post_content[:200]}{'...' if len(post_content) > 200 else ''}"
+                            )
+                            self.telegram_agent.send_confirmation_sync(confirmation_msg)
                     else:
                         error = f"Failed to publish {platform} post"
                         print(f"✗ {error}")
@@ -694,13 +715,24 @@ class PostWorkflow:
                                 visibility=mastodon_visibility
                             )
                             if reply_status:
+                                reply_url = reply_status.get('url', 'N/A')
                                 posted_replies.append({
                                     'post_id': post_id,
                                     'reply_text': reply_text,
                                     'status_id': reply_status.get('id'),
-                                    'url': reply_status.get('url')
+                                    'url': reply_url
                                 })
                                 print(f"  ✓ Replied to post {post_id}")
+                                
+                                # Send confirmation via Telegram if available
+                                if self.telegram_agent and approval_mode == "telegram":
+                                    confirmation_msg = (
+                                        f"✅ Reply Posted Successfully!\n\n"
+                                        f"Reply to post: {post_id}\n"
+                                        f"URL: {reply_url}\n\n"
+                                        f"Reply content:\n{reply_text[:200]}{'...' if len(reply_text) > 200 else ''}"
+                                    )
+                                    self.telegram_agent.send_confirmation_sync(confirmation_msg)
                         except Exception as e:
                             error = f"Failed to reply to post {post_id}: {e}"
                             print(f"  ✗ {error}")
@@ -720,13 +752,24 @@ class PostWorkflow:
                             visibility=mastodon_visibility
                         )
                         if reply_status:
+                            reply_url = reply_status.get('url', 'N/A')
                             posted_replies.append({
                                 'post_id': post_id,
                                 'reply_text': reply_text,
                                 'status_id': reply_status.get('id'),
-                                'url': reply_status.get('url')
+                                'url': reply_url
                             })
                             print(f"  ✓ Replied to post {post_id}")
+                            
+                            # Send confirmation via Telegram if available
+                            if self.telegram_agent and approval_mode == "telegram":
+                                confirmation_msg = (
+                                    f"✅ Reply Posted Successfully!\n\n"
+                                    f"Reply to post: {post_id}\n"
+                                    f"URL: {reply_url}\n\n"
+                                    f"Reply content:\n{reply_text[:200]}{'...' if len(reply_text) > 200 else ''}"
+                                )
+                                self.telegram_agent.send_confirmation_sync(confirmation_msg)
                     except Exception as e:
                         error = f"Failed to reply to post {post_id}: {e}"
                         print(f"  ✗ {error}")
