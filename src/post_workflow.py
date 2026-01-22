@@ -383,20 +383,49 @@ class PostWorkflow:
                         print("Invalid input. Please enter 'a' to accept or 'r' to regenerate.")
                 
                 else:  # approval_mode == "telegram"
-                    # Telegram approval
+                    # Telegram approval with inline regeneration
+                    async def regenerate_post():
+                        """Async wrapper for post regeneration"""
+                        print(f"\n   Regenerating {platform} post...")
+                        # Run synchronous generate_post in thread pool
+                        loop = asyncio.get_event_loop()
+                        new_post = await loop.run_in_executor(
+                            None,
+                            lambda: self.openrouter_client.generate_post(
+                                product_description=product_description,
+                                platform=platform,
+                                tone=tone
+                            )
+                        )
+                        
+                        if new_post:
+                            print(f"✓ Regenerated {platform} post ({len(new_post)} characters)")
+                            return new_post
+                        else:
+                            error = f"Failed to regenerate post for {platform}"
+                            print(f"✗ {error}")
+                            results["errors"].append(error)
+                            return None
+                    
                     decision = asyncio.run(
                         self.telegram_agent.wait_for_post_approval(
                             platform=platform,
-                            post_content=current_post
+                            post_content=current_post,
+                            regenerate_callback=regenerate_post
                         )
                     )
                     
                     if decision == "accept":
-                        approved_posts[platform] = current_post
+                        # Get the final content from the agent (may have been regenerated)
+                        final_post = self.telegram_agent.final_content or current_post
+                        approved_posts[platform] = final_post
+                        current_post = final_post  # Update for consistency
                         print(f"✓ Accepted {platform} post via Telegram")
                         break
                     elif decision == "regenerate":
-                        print(f"\n   Regenerating {platform} post...")
+                        # This shouldn't happen if regenerate_callback is used,
+                        # but handle it just in case
+                        print(f"\n   Regenerating {platform} post (fallback)...")
                         new_post = self.openrouter_client.generate_post(
                             product_description=product_description,
                             platform=platform,
