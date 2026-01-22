@@ -4,7 +4,7 @@ This directory contains scripts for deploying the Post Generation project to a G
 
 ## Scripts Overview
 
-### `deploy_from_local.sh` (Recommended)
+### `deploy_from_local.sh` / `deploy_from_local.ps1` (Recommended)
 **Run this from your local machine** to deploy to the VM automatically.
 
 This script:
@@ -15,10 +15,16 @@ This script:
 - Sets up systemd service
 - Generates configuration templates
 
-**Usage:**
+**Usage (Linux/macOS):**
 ```bash
 export GIT_REPO_URL="https://github.com/yourusername/post_generation.git"
 bash deploy/deploy_from_local.sh
+```
+
+**Usage (Windows PowerShell):**
+```powershell
+$env:GIT_REPO_URL = "https://github.com/yourusername/post_generation.git"
+.\deploy\deploy_from_local.ps1
 ```
 
 ### `setup_environment.sh`
@@ -65,13 +71,20 @@ Systemd service file template. This is automatically installed by `setup_systemd
 
 ### Automated (Recommended)
 1. From your local machine, run:
-   ```bash
-   bash deploy/deploy_from_local.sh
-   ```
+   - **Linux/macOS:** `bash deploy/deploy_from_local.sh`
+   - **Windows:** `.\deploy\deploy_from_local.ps1`
 2. Upload your configuration files:
-   ```bash
-   gcloud compute scp --zone=asia-southeast1-a .config/* sundai-vm:~/post_generation/.config/
-   ```
+   - **Windows PowerShell:**
+     ```powershell
+     Get-ChildItem .config\*.json -Exclude *.example | ForEach-Object {
+         $targetPath = "/home/hewenhao/post_generation/.config/$($_.Name)"
+         gcloud compute scp --zone=asia-southeast1-a $_.FullName "sundai-vm:$targetPath"
+     }
+     ```
+   - **Linux/macOS:**
+     ```bash
+     gcloud compute scp --zone=asia-southeast1-a .config/* sundai-vm:/home/hewenhao/post_generation/.config/
+     ```
 3. Start the service:
    ```bash
    gcloud compute ssh sundai-vm --zone=asia-southeast1-a --command="sudo systemctl start post-generation"
@@ -108,7 +121,22 @@ sudo journalctl -u post-generation -f
 
 ## Configuration
 
-After deployment, edit these files on the VM:
+After deployment, upload your configuration files to the VM:
+
+**Windows PowerShell:**
+```powershell
+Get-ChildItem .config\*.json -Exclude *.example | ForEach-Object {
+    $targetPath = "/home/hewenhao/post_generation/.config/$($_.Name)"
+    gcloud compute scp --zone=asia-southeast1-a $_.FullName "sundai-vm:$targetPath"
+}
+```
+
+**Linux/macOS:**
+```bash
+gcloud compute scp --zone=asia-southeast1-a .config/* sundai-vm:/home/hewenhao/post_generation/.config/
+```
+
+Or edit these files directly on the VM:
 - `~/post_generation/.config/notion_config.json`
 - `~/post_generation/.config/openrouter_config.json`
 - `~/post_generation/.config/mastodon_config.json`

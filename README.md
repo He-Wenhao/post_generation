@@ -195,8 +195,18 @@ Deploy this project to a Google Cloud Platform VM instance as a systemd service 
    - Generate configuration file templates
 
 3. **Upload your configuration files**:
+   
+   **For Windows PowerShell:**
+   ```powershell
+   Get-ChildItem .config\*.json -Exclude *.example | ForEach-Object {
+       $targetPath = "/home/hewenhao/post_generation/.config/$($_.Name)"
+       gcloud compute scp --zone=asia-southeast1-a $_.FullName "sundai-vm:$targetPath"
+   }
+   ```
+   
+   **For Linux/macOS:**
    ```bash
-   gcloud compute scp --zone=asia-southeast1-a .config/* sundai-vm:~/post_generation/.config/
+   gcloud compute scp --zone=asia-southeast1-a .config/* sundai-vm:/home/hewenhao/post_generation/.config/
    ```
 
 4. **Start the service**:
@@ -302,7 +312,8 @@ To update the code on the VM:
 
 3. **Reinstall dependencies** (if `pyproject.toml` changed):
    ```bash
-   export PATH="$HOME/.cargo/bin:$PATH"
+   # uv is installed in ~/.local/bin by default
+   export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
    uv sync
    ```
 
@@ -317,7 +328,7 @@ To update the code on the VM:
 - Check service status: `sudo systemctl status post-generation`
 - Check logs: `sudo journalctl -u post-generation -n 50`
 - Verify configuration files exist in `~/post_generation/.config/`
-- Verify `uv` is installed: `which uv` or `~/.cargo/bin/uv --version`
+- Verify `uv` is installed: `which uv` or check `~/.local/bin/uv --version` or `~/.cargo/bin/uv --version`
 
 **Service keeps restarting:**
 - Check error logs: `cat /var/log/post-generation/error.log`
