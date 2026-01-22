@@ -63,8 +63,31 @@ class MastodonAgent:
         # Keep basic formatting but clean up
         return content
     
+    def upload_media(self, file_path: str, description: Optional[str] = None) -> Optional[Dict]:
+        """
+        Upload a media file (image) to Mastodon.
+        
+        Args:
+            file_path: Path to the image file
+            description: Optional alt text/description for the image
+        
+        Returns:
+            Media attachment dict with 'id', or None if failed
+        """
+        try:
+            media = self.mastodon.media_post(
+                media_file=file_path,
+                description=description or ""
+            )
+            print(f"✓ Uploaded media: {file_path}")
+            return media
+        except Exception as e:
+            print(f"✗ Failed to upload media: {e}")
+            return None
+    
     def post_status(self, content: str, visibility: str = 'public', 
-                   spoiler_text: Optional[str] = None) -> dict:
+                   spoiler_text: Optional[str] = None,
+                   media_ids: Optional[List[int]] = None) -> dict:
         """
         Post a status to Mastodon
         
@@ -72,6 +95,7 @@ class MastodonAgent:
             content: The status content (max 500 characters for most instances)
             visibility: 'public', 'unlisted', 'private', or 'direct'
             spoiler_text: Optional content warning text
+            media_ids: Optional list of media attachment IDs (from upload_media)
         
         Returns:
             The created status dict
@@ -90,7 +114,8 @@ class MastodonAgent:
             status = self.mastodon.status_post(
                 content,
                 visibility=visibility,
-                spoiler_text=spoiler_text
+                spoiler_text=spoiler_text,
+                media_ids=media_ids
             )
             print(f"✓ Posted successfully! Status ID: {status['id']}")
             print(f"  URL: {status['url']}")

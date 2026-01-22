@@ -107,6 +107,15 @@ except ImportError:
     TELEGRAM_AVAILABLE = False
     load_telegram_config = None
 
+# Optional import for image generation
+try:
+    from generate_figure import generate_image, load_config as load_replicate_config
+    IMAGE_GEN_AVAILABLE = True
+except ImportError:
+    IMAGE_GEN_AVAILABLE = False
+    generate_image = None
+    load_replicate_config = None
+
 
 def load_workflow_config(config_path: str = ".config/workflow_config.json") -> dict:
     """Load workflow configuration from JSON file"""
@@ -360,7 +369,11 @@ class PostWorkflow:
                     response = input(f"Accept this {platform} post or regenerate? (a/r): ").lower().strip()
                     
                     if response == 'a':
-                        approved_posts[platform] = current_post
+                        # Store post with structure for image attachment
+                        approved_posts[platform] = {
+                            'content': current_post,
+                            'image_path': None
+                        }
                         print(f"✓ Accepted {platform} post")
                         break
                     elif response == 'r':
@@ -418,7 +431,11 @@ class PostWorkflow:
                     if decision == "accept":
                         # Get the final content from the agent (may have been regenerated)
                         final_post = self.telegram_agent.final_content or current_post
-                        approved_posts[platform] = final_post
+                        # Store post with structure for image attachment
+                        approved_posts[platform] = {
+                            'content': final_post,
+                            'image_path': None
+                        }
                         current_post = final_post  # Update for consistency
                         print(f"✓ Accepted {platform} post via Telegram")
                         break
@@ -447,6 +464,59 @@ class PostWorkflow:
             print("\n✗ No posts were approved. Cannot proceed.")
             return results
         
+        # Step 2.6: Generate images for approved posts
+        if IMAGE_GEN_AVAILABLE and "mastodon" in platforms:
+            print("\n🎨 Step 2.6: Generating images for posts...")
+            
+            # Load replicate config
+            replicate_config = {}
+            if load_replicate_config:
+                replicate_config = load_replicate_config()
+            
+            for platform in platforms:
+                if platform not in approved_posts:
+                    continue
+                
+                post_data = approved_posts[platform]
+                post_content = post_data.get('content') if isinstance(post_data, dict) else post_data
+                
+                if not post_content:
+                    continue
+                
+                try:
+                    print(f"\n   Generating image for {platform} post...")
+                    print(f"   Using post content as prompt...")
+                    
+                    # Use post content as prompt for image generation
+                    image_result = generate_image(
+                        prompt=post_content,
+                        config=replicate_config,
+                        download=True
+                    )
+                    
+                    if 'file_path' in image_result:
+                        # Update approved_posts with image path
+                        if isinstance(approved_posts[platform], dict):
+                            approved_posts[platform]['image_path'] = image_result['file_path']
+                        else:
+                            # Convert to dict structure
+                            approved_posts[platform] = {
+                                'content': approved_posts[platform],
+                                'image_path': image_result['file_path']
+                            }
+                        print(f"✓ Generated and saved image: {image_result['file_path']}")
+                    else:
+                        print(f"⚠ Image generation completed but file not downloaded")
+                        print(f"   Image URL: {image_result.get('url', 'N/A')}")
+                except Exception as e:
+                    print(f"✗ Failed to generate image for {platform}: {e}")
+                    # Continue without image
+                    if not isinstance(approved_posts[platform], dict):
+                        approved_posts[platform] = {
+                            'content': approved_posts[platform],
+                            'image_path': None
+                        }
+        
         # Step 3: Publish to Mastodon (only if "mastodon" is in platforms)
         published_posts = {}
         
@@ -460,10 +530,16 @@ class PostWorkflow:
             if not auto_publish:
                 if approval_mode == "cmd":
                     print("\nApproved posts:")
-                    for platform, post_content in approved_posts.items():
+                    for platform, post_data in approved_posts.items():
+                        # Extract post content
+                        post_content = post_data.get('content') if isinstance(post_data, dict) else post_data
+                        image_path = post_data.get('image_path') if isinstance(post_data, dict) else None
+                        
                         print(f"\n{platform.upper()}:")
                         print("-" * 60)
                         print(post_content)
+                        if image_path:
+                            print(f"\n[Image: {image_path}]")
                         print("-" * 60)
                     
                     response = input("\nPublish all posts to Mastodon? (y/n): ")
@@ -481,15 +557,36 @@ class PostWorkflow:
                     # Continue to show summary even if publishing cancelled
                 else:
                     # Only publish if user confirmed
-                    for platform, post_content in approved_posts.items():
+                    for platform, post_data in approved_posts.items():
                         print(f"\n   Publishing {platform} post...")
                         
+                        # Extract post content and image path
+                        if isinstance(post_data, dict):
+                            post_content = post_data.get('content', '')
+                            image_path = post_data.get('image_path')
+                        else:
+                            # Backward compatibility
+                            post_content = post_data
+                            image_path = None
+                        
+                        # Upload image if available
+                        media_ids = None
+                        if image_path and Path(image_path).exists():
+                            print(f"   Uploading image: {image_path}")
+                            media = self.mastodon_agent.upload_media(
+                                file_path=image_path,
+                                description=f"Image for {platform} post"
+                            )
+                            if media:
+                                media_ids = [media['id']]
+                                print(f"✓ Image uploaded successfully")
+                        
                         # Post to Mastodon
-                        # For Mastodon, we'll post each platform's post as a separate status
                         status = self.mastodon_agent.post_status(
                             content=post_content,
                             visibility=mastodon_visibility,
-                            spoiler_text=mastodon_spoiler
+                            spoiler_text=mastodon_spoiler,
+                            media_ids=media_ids
                         )
                         
                         if status:
@@ -516,13 +613,35 @@ class PostWorkflow:
                             results["errors"].append(error)
             else:
                 # Auto-publish mode
-                for platform, post_content in approved_posts.items():
+                for platform, post_data in approved_posts.items():
                     print(f"\n   Publishing {platform} post...")
+                    
+                    # Extract post content and image path
+                    if isinstance(post_data, dict):
+                        post_content = post_data.get('content', '')
+                        image_path = post_data.get('image_path')
+                    else:
+                        # Backward compatibility
+                        post_content = post_data
+                        image_path = None
+                    
+                    # Upload image if available
+                    media_ids = None
+                    if image_path and Path(image_path).exists():
+                        print(f"   Uploading image: {image_path}")
+                        media = self.mastodon_agent.upload_media(
+                            file_path=image_path,
+                            description=f"Image for {platform} post"
+                        )
+                        if media:
+                            media_ids = [media['id']]
+                            print(f"✓ Image uploaded successfully")
                     
                     status = self.mastodon_agent.post_status(
                         content=post_content,
                         visibility=mastodon_visibility,
-                        spoiler_text=mastodon_spoiler
+                        spoiler_text=mastodon_spoiler,
+                        media_ids=media_ids
                     )
                     
                     if status:
@@ -541,7 +660,6 @@ class PostWorkflow:
                                 f"✅ Post Published Successfully!\n\n"
                                 f"Platform: {platform.upper()}\n"
                                 f"URL: {post_url}\n\n"
-                                f"Content:\n{post_content[:200]}{'...' if len(post_content) > 200 else ''}"
                             )
                             self.telegram_agent.send_confirmation_sync(confirmation_msg)
                     else:
