@@ -214,7 +214,7 @@ class PostWorkflow:
             mode: Workflow mode - "post" (generate and publish posts) or "reply" (find and reply to posts)
             platforms: List of platforms (twitter, linkedin, instagram, etc.) - only used in "post" mode
             tone: Tone for posts (engaging, professional, casual, etc.)
-            auto_publish: If True, publish without confirmation - only used in "post" mode
+            auto_publish: If True, publish without confirmation - used in both "post" and "reply" modes
             mastodon_visibility: Mastodon post visibility (public, unlisted, private, direct)
             mastodon_spoiler: Optional spoiler/content warning text - only used in "post" mode
         
@@ -231,7 +231,7 @@ class PostWorkflow:
             )
         else:  # mode == "reply"
             return self._run_reply_mode(
-                source_page_id, tone, mastodon_visibility
+                source_page_id, tone, auto_publish, mastodon_visibility
             )
     
     def _run_post_mode(
@@ -313,10 +313,58 @@ class PostWorkflow:
                 print(f"✗ {error}")
                 results["errors"].append(error)
         
-        results["generated_posts"] = generated_posts
-        
         if not generated_posts:
             print("\n✗ No posts were generated. Cannot proceed.")
+            return results
+        
+        # Step 2.5: Review and approve/regenerate posts
+        print("\n📝 Step 2.5: Review and approve posts...")
+        approved_posts = {}
+        
+        for platform in platforms:
+            if platform not in generated_posts:
+                continue  # Skip if generation failed
+            
+            current_post = generated_posts[platform]
+            
+            while True:
+                print(f"\n{platform.upper()} Post:")
+                print("-" * 60)
+                print(current_post)
+                print("-" * 60)
+                
+                response = input(f"Accept this {platform} post or regenerate? (a/r): ").lower().strip()
+                
+                if response == 'a':
+                    # Accept the post
+                    approved_posts[platform] = current_post
+                    print(f"✓ Accepted {platform} post")
+                    break
+                elif response == 'r':
+                    # Regenerate the post
+                    print(f"\n   Regenerating {platform} post...")
+                    new_post = self.openrouter_client.generate_post(
+                        product_description=product_description,
+                        platform=platform,
+                        tone=tone
+                    )
+                    
+                    if new_post:
+                        current_post = new_post
+                        print(f"✓ Regenerated {platform} post ({len(new_post)} characters)")
+                    else:
+                        error = f"Failed to regenerate post for {platform}"
+                        print(f"✗ {error}")
+                        results["errors"].append(error)
+                        # Keep the old post and ask again
+                        print("   Keeping previous version. Please try again.")
+                else:
+                    print("Invalid input. Please enter 'a' to accept or 'r' to regenerate.")
+        
+        results["generated_posts"] = approved_posts
+        
+        if not approved_posts:
+            print("\n✗ No posts were approved. Cannot proceed.")
             return results
         
         # Step 3: Publish to Mastodon (only if "mastodon" is in platforms)
@@ -330,8 +378,8 @@ class PostWorkflow:
             print(f"   Visibility: {mastodon_visibility}")
             
             if not auto_publish:
-                print("\nGenerated posts:")
-                for platform, post_content in generated_posts.items():
+                print("\nApproved posts:")
+                for platform, post_content in approved_posts.items():
                     print(f"\n{platform.upper()}:")
                     print("-" * 60)
                     print(post_content)
@@ -343,7 +391,7 @@ class PostWorkflow:
                     # Continue to show summary even if publishing cancelled
                 else:
                     # Only publish if user confirmed
-                    for platform, post_content in generated_posts.items():
+                    for platform, post_content in approved_posts.items():
                         print(f"\n   Publishing {platform} post...")
                         
                         # Post to Mastodon
@@ -368,7 +416,7 @@ class PostWorkflow:
                             results["errors"].append(error)
             else:
                 # Auto-publish mode
-                for platform, post_content in generated_posts.items():
+                for platform, post_content in approved_posts.items():
                     print(f"\n   Publishing {platform} post...")
                     
                     status = self.mastodon_agent.post_status(
@@ -396,9 +444,9 @@ class PostWorkflow:
         print("\n" + "=" * 60)
         print("✅ Workflow Complete!")
         print("=" * 60)
-        print(f"Generated posts: {len(generated_posts)}/{len(platforms)}")
+        print(f"Generated posts: {len(approved_posts)}/{len(platforms)}")
         if "mastodon" in platforms:
-            print(f"Published posts: {len(published_posts)}/{len(generated_posts)}")
+            print(f"Published posts: {len(published_posts)}/{len(approved_posts)}")
         else:
             print(f"Published posts: 0 (Mastodon not in platforms)")
         
@@ -413,6 +461,7 @@ class PostWorkflow:
         self,
         source_page_id: str,
         tone: str,
+        auto_publish: bool,
         mastodon_visibility: str
     ) -> Dict:
         """
@@ -421,6 +470,7 @@ class PostWorkflow:
         Args:
             source_page_id: Notion page ID containing product description
             tone: Tone for replies (engaging, professional, casual, etc.)
+            auto_publish: If True, publish without confirmation
             mastodon_visibility: Mastodon reply visibility (public, unlisted, private, direct)
         
         Returns:
@@ -504,30 +554,79 @@ class PostWorkflow:
         print("\n📤 Step 4: Posting replies...")
         print(f"   Visibility: {mastodon_visibility}")
         
-        posted_replies = []
-        for reply_data in replies:
-            post_id = reply_data.get('post_id')
-            reply_text = reply_data.get('reply')
+        if not auto_publish:
+            print("\nGenerated replies:")
+            for i, reply_data in enumerate(replies, 1):
+                post_id = reply_data.get('post_id')
+                reply_text = reply_data.get('reply')
+                original_post = next((p for p in related_posts if str(p.get('id')) == str(post_id)), None)
+                
+                if post_id and reply_text:
+                    print(f"\nReply {i} (to post {post_id}):")
+                    if original_post:
+                        original_content = original_post.get('content', '')[:100]
+                        print(f"  Original post: {original_content}...")
+                    print("-" * 60)
+                    print(reply_text)
+                    print("-" * 60)
             
-            if post_id and reply_text:
-                try:
-                    reply_status = self.mastodon_agent.reply_to_status(
-                        status_id=int(post_id),
-                        content=reply_text,
-                        visibility=mastodon_visibility
-                    )
-                    if reply_status:
-                        posted_replies.append({
-                            'post_id': post_id,
-                            'reply_text': reply_text,
-                            'status_id': reply_status.get('id'),
-                            'url': reply_status.get('url')
-                        })
-                        print(f"  ✓ Replied to post {post_id}")
-                except Exception as e:
-                    error = f"Failed to reply to post {post_id}: {e}"
-                    print(f"  ✗ {error}")
-                    results["errors"].append(error)
+            response = input("\nPost all replies to Mastodon? (y/n): ")
+            if response.lower() != 'y':
+                print("Posting cancelled.")
+                # Continue to show summary even if posting cancelled
+                posted_replies = []
+            else:
+                # Only post if user confirmed
+                posted_replies = []
+                for reply_data in replies:
+                    post_id = reply_data.get('post_id')
+                    reply_text = reply_data.get('reply')
+                    
+                    if post_id and reply_text:
+                        try:
+                            reply_status = self.mastodon_agent.reply_to_status(
+                                status_id=int(post_id),
+                                content=reply_text,
+                                visibility=mastodon_visibility
+                            )
+                            if reply_status:
+                                posted_replies.append({
+                                    'post_id': post_id,
+                                    'reply_text': reply_text,
+                                    'status_id': reply_status.get('id'),
+                                    'url': reply_status.get('url')
+                                })
+                                print(f"  ✓ Replied to post {post_id}")
+                        except Exception as e:
+                            error = f"Failed to reply to post {post_id}: {e}"
+                            print(f"  ✗ {error}")
+                            results["errors"].append(error)
+        else:
+            # Auto-publish mode
+            posted_replies = []
+            for reply_data in replies:
+                post_id = reply_data.get('post_id')
+                reply_text = reply_data.get('reply')
+                
+                if post_id and reply_text:
+                    try:
+                        reply_status = self.mastodon_agent.reply_to_status(
+                            status_id=int(post_id),
+                            content=reply_text,
+                            visibility=mastodon_visibility
+                        )
+                        if reply_status:
+                            posted_replies.append({
+                                'post_id': post_id,
+                                'reply_text': reply_text,
+                                'status_id': reply_status.get('id'),
+                                'url': reply_status.get('url')
+                            })
+                            print(f"  ✓ Replied to post {post_id}")
+                    except Exception as e:
+                        error = f"Failed to reply to post {post_id}: {e}"
+                        print(f"  ✗ {error}")
+                        results["errors"].append(error)
         
         results["posted_replies"] = posted_replies
         print(f"\n✓ Posted {len(posted_replies)} replies successfully")
@@ -730,7 +829,7 @@ def main():
         mode=mode,
         platforms=platforms if mode == 'post' else [],
         tone=tone,
-        auto_publish=auto_publish if mode == 'post' else False,
+        auto_publish=auto_publish,
         mastodon_visibility=mastodon_visibility,
         mastodon_spoiler=mastodon_spoiler if mode == 'post' else None
     )
