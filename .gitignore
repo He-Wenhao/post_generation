@@ -6,6 +6,12 @@
 # Temporary/post scripts folder (for testing)
 post_scripts/
 
+# Generated images
+.images/
+
+# Generated images
+.images/
+
 # Python
 __pycache__/
 *.py[cod]
