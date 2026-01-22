@@ -16,7 +16,7 @@ from datetime import datetime
 
 try:
     from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
-    from telegram.ext import Application, CallbackQueryHandler, ContextTypes
+    from telegram.ext import Application, CallbackQueryHandler, ContextTypes, MessageHandler, filters
     from telegram import Update
     TELEGRAM_AVAILABLE = True
 except ImportError:
@@ -29,6 +29,8 @@ except ImportError:
     CallbackQueryHandler = None
     ContextTypes = None
     Update = None
+    MessageHandler = None
+    filters = None
 
 # Get project root (parent of src directory)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -513,6 +515,97 @@ class TelegramApprovalAgent:
                 loop.close()
         except Exception as e:
             print(f"✗ Failed to send confirmation to Telegram: {e}")
+            return False
+    
+    async def wait_for_trigger(
+        self,
+        trigger_message: str,
+        timeout: Optional[int] = None
+    ) -> bool:
+        """
+        Wait for a specific trigger message from Telegram.
+        
+        Args:
+            trigger_message: The exact message to wait for (e.g., "post_mastodon")
+            timeout: Optional timeout in seconds. If None, waits indefinitely.
+        
+        Returns:
+            True if trigger message was received, False if timeout or error
+        """
+        trigger_received = False
+        trigger_event = asyncio.Event()
+        
+        async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            """Handle incoming messages"""
+            nonlocal trigger_received
+            
+            if update.message and update.message.text:
+                message_text = update.message.text.strip()
+                print(f"📥 Received message: {message_text}")
+                
+                if message_text == trigger_message:
+                    trigger_received = True
+                    await update.message.reply_text(
+                        f"✅ Trigger received: {trigger_message}\n"
+                        f"Starting workflow..."
+                    )
+                    trigger_event.set()
+                else:
+                    print(f"   (Waiting for '{trigger_message}', ignoring other messages)")
+        
+        # Set up the listener
+        self.app = Application.builder().token(self.bot_token).build()
+        self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+        
+        try:
+            await self.app.initialize()
+            await self.app.start()
+            await self.app.updater.start_polling()
+            
+            print(f"🔔 Listening for trigger message: '{trigger_message}'")
+            print(f"   Send this message to the bot to start the workflow...")
+            
+            # Wait for trigger with optional timeout
+            if timeout:
+                try:
+                    await asyncio.wait_for(trigger_event.wait(), timeout=timeout)
+                except asyncio.TimeoutError:
+                    print(f"⏱️ Timeout waiting for trigger message")
+                    return False
+            else:
+                await trigger_event.wait()
+            
+            return trigger_received
+        finally:
+            await self._cleanup_app()
+    
+    def wait_for_trigger_sync(
+        self,
+        trigger_message: str,
+        timeout: Optional[int] = None
+    ) -> bool:
+        """
+        Synchronous wrapper for wait_for_trigger.
+        
+        Args:
+            trigger_message: The exact message to wait for
+            timeout: Optional timeout in seconds
+        
+        Returns:
+            True if trigger message was received, False otherwise
+        """
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(
+                    self.wait_for_trigger(trigger_message, timeout)
+                )
+                return result
+            finally:
+                loop.close()
+        except Exception as e:
+            print(f"✗ Error waiting for trigger: {e}")
             return False
 
 

@@ -946,6 +946,12 @@ def main():
     
     workflow_config = load_workflow_config(workflow_config_path)
     
+    # Check for Telegram trigger
+    telegram_trigger = workflow_config.get('telegram_trigger')
+    # Handle both null (None) and string "null"
+    if telegram_trigger == "null" or telegram_trigger is None:
+        telegram_trigger = None
+    
     # Load other configs
     notion_config = load_notion_config()
     openrouter_config = load_openrouter_config()
@@ -955,6 +961,54 @@ def main():
     telegram_config = {}
     if load_telegram_config:
         telegram_config = load_telegram_config()
+    
+    # If telegram_trigger is set, wait for trigger message before proceeding
+    if telegram_trigger:
+        if not TELEGRAM_AVAILABLE:
+            print("Error: Telegram trigger mode requires python-telegram-bot")
+            print("Install it with: pip install python-telegram-bot")
+            sys.exit(1)
+        
+        telegram_bot_token = (
+            telegram_config.get('bot_token') or
+            os.getenv('TELEGRAM_BOT_TOKEN')
+        )
+        telegram_chat_id = (
+            telegram_config.get('chat_id') or
+            os.getenv('TELEGRAM_CHAT_ID')
+        )
+        
+        if not telegram_bot_token:
+            print("Error: Telegram bot token is required (telegram_trigger is set)")
+            print("Set it in .config/telegram_config.json or TELEGRAM_BOT_TOKEN environment variable")
+            sys.exit(1)
+        
+        if not telegram_chat_id:
+            print("Error: Telegram chat ID is required (telegram_trigger is set)")
+            print("Set it in .config/telegram_config.json or TELEGRAM_CHAT_ID environment variable")
+            sys.exit(1)
+        
+        # Create Telegram agent for trigger listening
+        trigger_agent = TelegramApprovalAgent(
+            bot_token=telegram_bot_token,
+            chat_id=telegram_chat_id
+        )
+        
+        print("=" * 60)
+        print("🔔 Telegram Trigger Mode Enabled")
+        print("=" * 60)
+        print(f"Waiting for trigger message: '{telegram_trigger}'")
+        print("Send this message to the bot to start the workflow...")
+        print("=" * 60)
+        
+        # Wait for trigger message
+        trigger_received = trigger_agent.wait_for_trigger_sync(telegram_trigger)
+        
+        if not trigger_received:
+            print("\n✗ Trigger not received. Exiting.")
+            sys.exit(0)
+        
+        print("\n✅ Trigger received! Starting workflow...\n")
     
     # Get credentials
     notion_api_token = (

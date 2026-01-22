@@ -9,5 +9,6 @@
     "spoiler_text": null
   },
   "auto_publish": false,
-  "approval_mode": "telegram"
+  "approval_mode": "telegram",
+  "telegram_trigger": null
 }
