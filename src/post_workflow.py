@@ -116,6 +116,14 @@ except ImportError:
     generate_image = None
     load_replicate_config = None
 
+# Optional import for local RAG context
+try:
+    from arxiv_rag import ArxivAbstractRAG
+    RAG_AVAILABLE = True
+except ImportError:
+    ArxivAbstractRAG = None
+    RAG_AVAILABLE = False
+
 
 def load_workflow_config(config_path: str = ".config/workflow_config.json") -> dict:
     """Load workflow configuration from JSON file"""
@@ -168,6 +176,7 @@ class PostWorkflow:
             telegram_agent: Optional TelegramApprovalAgent instance for Telegram approval
         """
         self.notion_agent = NotionAgent(api_token=notion_api_token)
+        self._openrouter_api_key = openrouter_api_key
         self.openrouter_client = OpenRouterClient(
             api_key=openrouter_api_key,
             model=openrouter_model
@@ -317,6 +326,51 @@ class PostWorkflow:
         preview = product_description[:200] + "..." if len(product_description) > 200 else product_description
         print(preview)
         print("-" * 60)
+
+        # Step 1.5: Retrieve RAG context from local arxiv abstracts (optional)
+        rag_context = None
+        rag_hits = []
+        try:
+            rag_enabled = os.getenv("RAG_ENABLED", "1").strip().lower() not in {"0", "false", "no"}
+            rag_semantic = os.getenv("RAG_SEMANTIC", "0").strip().lower() in {"1", "true", "yes"}
+            rag_top_k = int(os.getenv("RAG_TOP_K", "8"))
+            rag_max_chars = int(os.getenv("RAG_MAX_CHARS", "4000"))
+            rag_embed_model = os.getenv("RAG_EMBED_MODEL", "openai/text-embedding-3-small")
+
+            docs_dir = PROJECT_ROOT / "arxiv-abstracts"
+            if rag_enabled and RAG_AVAILABLE and docs_dir.exists() and any(docs_dir.glob("*.md")):
+                print("\n📚 Step 1.5: Retrieving RAG context from arxiv-abstracts...")
+                rag = ArxivAbstractRAG(
+                    project_root=PROJECT_ROOT,
+                    openrouter_api_key=self._openrouter_api_key,
+                    enable_semantic=rag_semantic,
+                    embedding_model=rag_embed_model,
+                )
+                rag.ensure_index()
+                keywords = self._extract_keywords(product_description)
+                rag_query = " ".join(keywords[:8]).strip() if keywords else product_description[:300]
+                rag_context, rag_hits = rag.retrieve(
+                    rag_query,
+                    top_k=rag_top_k,
+                    max_chars=rag_max_chars,
+                )
+                if rag_context:
+                    print(f"✓ Retrieved RAG context ({len(rag_context)} characters)")
+                    # Print which files were retrieved (requested for cmd runs)
+                    if approval_mode == "cmd" and rag_hits:
+                        seen = set()
+                        files = []
+                        for h in rag_hits:
+                            f = getattr(h, "source_file", None)
+                            if f and f not in seen:
+                                seen.add(f)
+                                files.append(f)
+                        if files:
+                            print(f"   Retrieved from files ({len(files)}): {', '.join(files)}")
+                else:
+                    print("ℹ️  No relevant RAG context found (continuing without it)")
+        except Exception as e:
+            print(f"⚠ RAG retrieval failed (continuing without it): {type(e).__name__}: {e}")
         
         # Step 2: Generate posts for each platform
         print(f"\n🤖 Step 2: Generating posts using AI...")
@@ -331,7 +385,8 @@ class PostWorkflow:
             post = self.openrouter_client.generate_post(
                 product_description=product_description,
                 platform=platform,
-                tone=tone
+                tone=tone,
+                rag_context=rag_context,
             )
             
             if post:
@@ -381,7 +436,8 @@ class PostWorkflow:
                         new_post = self.openrouter_client.generate_post(
                             product_description=product_description,
                             platform=platform,
-                            tone=tone
+                            tone=tone,
+                            rag_context=rag_context,
                         )
                         
                         if new_post:
@@ -407,7 +463,8 @@ class PostWorkflow:
                             lambda: self.openrouter_client.generate_post(
                                 product_description=product_description,
                                 platform=platform,
-                                tone=tone
+                                tone=tone,
+                                rag_context=rag_context,
                             )
                         )
                         
@@ -446,7 +503,8 @@ class PostWorkflow:
                         new_post = self.openrouter_client.generate_post(
                             product_description=product_description,
                             platform=platform,
-                            tone=tone
+                            tone=tone,
+                            rag_context=rag_context,
                         )
                         
                         if new_post:

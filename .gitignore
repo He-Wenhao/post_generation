@@ -9,6 +9,9 @@ post_scripts/
 # Generated images
 .images/
 
+# Local RAG index/cache
+.rag/
+
 # Generated images
 .images/
 

@@ -259,7 +259,8 @@ class OpenRouterClient:
         product_description: str,
         platform: str = "general",
         tone: str = "engaging",
-        max_length: Optional[int] = None
+        max_length: Optional[int] = None,
+        rag_context: Optional[str] = None,
     ) -> Optional[str]:
         """
         Generate a social media post from a product description
@@ -269,6 +270,7 @@ class OpenRouterClient:
             platform: Target platform (twitter, linkedin, instagram, etc.)
             tone: Post tone (engaging, professional, casual, etc.)
             max_length: Maximum length in characters (optional)
+            rag_context: Optional retrieved context (RAG) to ground claims
         
         Returns:
             Generated post content
@@ -290,10 +292,24 @@ class OpenRouterClient:
         platform_prompt = platform_prompts.get(platform.lower(), platform_prompts["general"])
         
         # Build the full prompt
+        rag_block = ""
+        if rag_context and rag_context.strip():
+            rag_block = f"""
+
+Reference Context (from local knowledge base):
+{rag_context}
+
+Grounding rules for Reference Context:
+- If you mention paper-specific claims, ONLY use facts supported by the Reference Context.
+- If the context is irrelevant or insufficient, do NOT invent details; write a more general post instead.
+- Prefer citing the arXiv ID/filename when referencing a paper (e.g., "2501.02730").
+"""
+
         prompt = f"""Based on the following product description, generate a social media post.
 
 Product Description:
 {product_description}
+{rag_block}
 
 Requirements:
 - Platform: {platform_prompt}
